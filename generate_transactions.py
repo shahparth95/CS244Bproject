@@ -1,6 +1,6 @@
 import requests
 import random
-import json
+from time import sleep
 
 # list of ports to send the transactions to
 ports = [5000]
@@ -23,3 +23,4 @@ for i in range(N):
     url = 'http://localhost:' + str(port) + add_endpoint
     data = generate_transaction()
     requests.post(url, json=data)
+    sleep(2*random.random())
