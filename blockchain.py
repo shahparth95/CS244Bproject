@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 from threading import Thread, Lock
+from multiprocessing import Process
 from time import sleep,time
 import random
 import hashlib
@@ -13,28 +14,53 @@ def valid_blockchain(blockchain):
   # TODO
   return True
 
+def gen_block(prev_hash, proof, txns = []):
+  block = {}
+  block['prev_hash'] = str(prev_hash)
+  block['proof'] = str(proof)
+  block['transactions'] = str(txns) # init with empty list
+  block['time'] = str(time())
+  # try and reason about this, why this provides safety in block
+  block_hash = hashlib.sha256(bytes(block['prev_hash'] + block['proof'] + block['transactions'] + block['time']))
+  block['block_hash'] = block_hash.hexdigest()
+
+  return block
+
+def valid_guess(prev_hash, prev_proof, guess):
+  # TODO might be sufficient to just use prev_hash. prev_proof is part of the prev_hash
+  hash_val = hashlib.sha256(bytes(str(prev_hash) + str(prev_proof) + str(guess)))
+  hash_str = hash_val.hexdigest()
+  return hash_str[:6] == '000000' or hash_str[:6] == '000001' or hash_str[:6] == '000002' or hash_str[:6] == '000003' or hash_str[:6] == '000004'
+
 class Node:
-  data_lock = Lock()
+  data_lock = Lock() # check about RW lock, could not find it inbuilt in threading module
   
-  def __init__(self, neighbours = []):
+  def __init__(self, port, neighbours = []):
     # TODO init should poll the neighbors to get the latest chain, in absence of which it should make the genesis block
     self.transactions = []
     self.blockchain = []
-    self.neighbours = set()
+    self.neighbours = set(neighbours)
+    self.port = port
 
     # Create the genesis block
     self.init_block(1, 1)
 
-  # functions for adding and listing neighbours for the node
+  '''
+  function to add neighbour to the current node
+  '''
   def add_neighbour(self, port):
     self.data_lock.acquire()
     self.neighbours.add(port)
     self.data_lock.release()    
 
+  '''
+  return the list of current neighbours
+  '''
   def neighbours_set(self):
     self.data_lock.acquire()
     result = self.neighbours
     self.data_lock.release()
+    
     return result
 
   # functions for adding and listing outstanding transactions
@@ -53,24 +79,13 @@ class Node:
 
   # functions for block handelling
   def init_block(self, hash_val, proof):
-    block = {}
-    block['prev_hash'] = str(hash_val)
-    block['proof'] = str(proof)
-    block['transactions'] = str([]) # init with empty list
-    block['time'] = str(time())
-    block_hash = hashlib.sha256(bytes(block['prev_hash'] + block['proof'] + block['transactions'] + block['time']))
-    block['block_hash'] = block_hash.hexdigest()
+    block = gen_block(hash_val, proof)
 
     self.data_lock.acquire()
     self.blockchain.append(block)
     self.data_lock.release()
 
   # mining functions, this function continuously tries to mine the new blocks
-  def valid_guess(self, prev_hash, prev_proof, guess):
-    hash_val = hashlib.sha256(bytes(str(prev_hash) + str(prev_proof) + str(guess)))
-    hash_str = hash_val.hexdigest()
-    return hash_str[:6] == '000000' or hash_str[:6] == '000001' or hash_str[:6] == '000002' or hash_str[:6] == '000003' or hash_str[:6] == '000003'
-
   def mine_block(self):
     blocks = 0
     while blocks < 5:
@@ -82,29 +97,23 @@ class Node:
       prev_hash = curr_tail['block_hash']
       prev_proof = curr_tail['proof']
       guess = random.randint(0, 2**31)
-      if self.valid_guess(prev_hash, prev_proof, guess):
+      if valid_guess(prev_hash, prev_proof, guess):
         self.data_lock.acquire()
         check_tail = self.blockchain[-1]
+        # incase the chain has changed since this work started
         if check_tail == curr_tail:
-          block = {}
-          block['prev_hash'] = str(prev_hash)
-          block['proof'] = str(guess)
-          block['transactions'] = str(self.transactions) # TODO check validity here
-          block['time'] = str(time())
-          block_hash = hashlib.sha256(bytes(block['prev_hash'] + block['proof'] + block['transactions'] + block['time']))
-          block['block_hash'] = block_hash.hexdigest()
+          block = gen_block(prev_hash, guess, self.transactions)
 
           self.transactions = []
           self.blockchain.append(block)
 
-          print '\nNew block minted '+ str(len(self.blockchain)) + '\n'
+          print '\nNew block minted by '+ str(self.port) + ', len: ' + str(len(self.blockchain)) + '\n'
           blocks += 1;
           # gossip
           for neighbour in self.neighbours:
             url = 'http://localhost:' + str(neighbour) + '/new_blockchain/'
             data = json.dumps(self.blockchain)
             requests.post(url, json=data)
-
         else:
           print "\nblock changed during computation\n"
         self.data_lock.release() 
@@ -120,63 +129,70 @@ class Node:
     if valid_blockchain(blockchain):
       self.data_lock.acquire()
       if len(self.blockchain) < len(blockchain):
-        print '\nBlockchain has been updated.' + str(len(self.blockchain)) + '->'+ str(len(blockchain)) + '\n'
+        print '\nBlockchain has been updated by port:' + str(port) + '.Length change' + str(len(self.blockchain)) + '->'+ str(len(blockchain)) + '\n'
         self.blockchain = blockchain
       self.data_lock.release()
 
-node = Node()
-
-
-# Flask Enpoints
-app = Flask(__name__)
-
-@app.route('/add_node/<int:port>')
-def add_neighbour(port):
-  node.add_neighbour(port)
-  return 'current neighbours: ' + str(node.neighbours_set())
-
-@app.route('/add_transaction/', methods=['POST'])
-def add_transaction():
-  txn = request.get_json()
-  # 1. add support for concurrent uses
-  # 2. check for validation and if it consists of standard fields and determined later
-  # transactions.append(txn)
-  node.add_transaction(txn)
-  return str(txn) + 'added successfully'
-
-@app.route('/outstanding_transactions/', methods=['GET'])
-def outstanding_transactions():
-  return jsonify(node.outstanding_transactions())
-
-@app.route('/current_blockchain/', methods=['GET'])
-def current_blockchain():
-  return jsonify(node.get_blockchain())
-
-# TODO this is the endpoint where other nodes can submit their blockchains to propogate it in the network
-@app.route('/new_blockchain/', methods=['POST'])
-def new_blockchain():
-  # TODO this can take some time, spawn a new thread to do this
-  blockchain = json.loads(request.get_json())
-  node.merge_blockchain(blockchain)
-  return "received"
-
-@app.route('/stop/')
-def stop():
-  # this is wrong update this
-  func = request.environ.get('werkzeug.server.shutdown')
-  func()
-
-
-def mine_block():
-  node.mine_block()
+# def mine_block():
+#   node.mine_block()
   
-if __name__ == "__main__":
-  parser = argparse.ArgumentParser(description='Start a node at a given port')
-  parser.add_argument('--port', metavar='P', default=5000, type=int, help='port on which to start node')
-  args = parser.parse_args()
-  port = args.port
+def spawn_node(port, neighbours):
+  node = Node(port, neighbours)
 
-  print port
-  thread1 = Thread(target = mine_block)
+  # Flask Enpoints
+  app = Flask(__name__)
+
+  @app.route('/add_node/<int:port>')
+  def add_neighbour(port):
+    node.add_neighbour(port)
+    return 'current neighbours: ' + str(node.neighbours_set())
+
+  @app.route('/add_transaction/', methods=['POST'])
+  def add_transaction():
+    txn = request.get_json()
+    # 1. add support for concurrent uses
+    # 2. check for validation and if it consists of standard fields and determined later
+    # transactions.append(txn)
+    node.add_transaction(txn)
+    return str(txn) + 'added successfully'
+
+  @app.route('/outstanding_transactions/', methods=['GET'])
+  def outstanding_transactions():
+    return jsonify(node.outstanding_transactions())
+
+  @app.route('/current_blockchain/', methods=['GET'])
+  def current_blockchain():
+    return jsonify(node.get_blockchain())
+
+  # TODO this is the endpoint where other nodes can submit their blockchains to propogate it in the network
+  @app.route('/new_blockchain/', methods=['POST'])
+  def new_blockchain():
+    # TODO this can take some time, spawn a new thread to do this
+    blockchain = json.loads(request.get_json())
+    node.merge_blockchain(blockchain)
+    return "received"
+
+  @app.route('/stop/')
+  def stop():
+    # this is wrong update this
+    func = request.environ.get('werkzeug.server.shutdown')
+    func()
+
+  thread1 = Thread(target = node.mine_block)
   thread1.start()
   app.run(port=port, debug=False, use_reloader=False)
+
+
+if __name__ == "__main__":
+  parser = argparse.ArgumentParser(description='Start a number of nodes to mine blockchains')
+  parser.add_argument('--nodes', default=5, type=int, help='Number of nodes to spawn')
+  args = parser.parse_args()
+  nodes = args.nodes
+
+  processes = []
+  for i in range(nodes):
+    ports = [5000+j for j in range(nodes)]
+    port = ports[i]
+    ports.remove(port)
+    p = Process(target = spawn_node, args = (port, ports))
+    p.start()
