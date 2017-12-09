@@ -12,9 +12,8 @@ import math
 import logging
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
-# logging.setlevel(logging.INFO)
 
-MINE_BLOCKS = 5
+MINE_BLOCKS = 7
 
 def valid_blockchain(blockchain):
   # TODO
@@ -36,8 +35,18 @@ def valid_guess(prev_hash, prev_proof, guess):
   # TODO might be sufficient to just use prev_hash. prev_proof is part of the prev_hash
   hash_val = hashlib.sha256(bytes(str(prev_hash) + str(prev_proof) + str(guess)))
   hash_str = hash_val.hexdigest()
-  # return hash_str[:6] == '000000' or hash_str[:6] == '000001' or hash_str[:6] == '000002' or hash_str[:6] == '000003' or hash_str[:6] == '000004'
-  return hash_str[:6] == '000000'
+  return hash_str[:6] == '000000' or hash_str[:6] == '000001' or hash_str[:6] == '000002' or hash_str[:6] == '000003' or hash_str[:6] == '000004'
+  # return hash_str[:5] == '00000'
+
+def check_different(blockchain_a, blockchain_b):
+  if len(blockchain_a) != len(blockchain_b):
+    return True
+
+  for i in range(len(blockchain_a)):
+    if blockchain_a[i]['block_hash'] != blockchain_b[i]['block_hash']:
+      return True
+
+  return False
 
 class Node:
   data_lock = Lock() # check about RW lock, could not find it inbuilt in threading module
@@ -116,19 +125,18 @@ class Node:
           self.transactions = []
           self.blockchain.append(block)
 
-          logging.info('New block minted by '+ str(self.port) + ', len: ' + str(len(self.blockchain)))
+          logging.error('New block minted by '+ str(self.port) + ', len: ' + str(len(self.blockchain)))
           blocks += 1;
           blockchain_updated = True
 
         self.data_lock.release() 
 
       if blockchain_updated:
-        thread = Thread(target = self.gossip_blockchain)
-        thread.start()
+        self.gossip_blockchain()
 
   def send_block(self, latency, dst_port, blockchain):
     logging.info('Data sending beginning for ' + str(dst_port) + ' from ' + str(self.port))
-    sleep(latency)
+    sleep(5*latency)
     url = 'http://localhost:' + str(dst_port) + '/new_blockchain/'
     data = json.dumps(blockchain)
     requests.post(url, json=data)
@@ -141,14 +149,10 @@ class Node:
 
     threads = []
     for neighbour in self.neighbours:
-      latency = random.random()*min(abs(self.port - neighbour), 5)
+      latency = random.random()*min(abs(self.port - neighbour), 10)
       thread = Thread(target=self.send_block, args = (latency, neighbour, current_blockchain))
       thread.start()
       threads.append(thread)
-
-    for thread in threads:
-      thread.join()
-
 
   def get_blockchain(self):
     self.data_lock.acquire()
@@ -158,14 +162,19 @@ class Node:
 
   def merge_blockchain(self, blockchain):
     if valid_blockchain(blockchain):
+      blockchain_updated = False
       self.data_lock.acquire()
       if len(self.blockchain) < len(blockchain):
-        logging.info('Blockchain has been updated by port:' + str(self.port) + '. Length change: ' + str(len(self.blockchain)) + '->'+ str(len(blockchain)))
+        logging.error('Blockchain has been updated by port:' + str(self.port) + '. Length change: ' + str(len(self.blockchain)) + '->'+ str(len(blockchain)))
         self.blockchain = blockchain
-      elif len(self.blockchain) == len(blockchain):
+        blockchain_updated = True
+      elif len(self.blockchain) == len(blockchain) and check_different(self.blockchain, blockchain):
         logging.error('BLOCKCHAIN CONFLICT at port ' + str(self.port))
       self.data_lock.release()
-  
+      
+      if blockchain_updated:
+        self.gossip_blockchain()
+
 def spawn_node(port, neighbours):
   node = Node(port, neighbours)
 
@@ -176,6 +185,10 @@ def spawn_node(port, neighbours):
   def add_neighbour(port):
     node.add_neighbour(port)
     return 'current neighbours: ' + str(node.neighbours_set())
+
+  @app.route('/get_neighbours/')
+  def get_neighbours():
+    return jsonify(list(node.neighbours_set()))
 
   @app.route('/add_transaction/', methods=['POST'])
   def add_transaction():
