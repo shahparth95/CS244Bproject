@@ -7,8 +7,14 @@ import hashlib
 import json
 import argparse
 import requests
+import math
 
+import logging
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
+# logging.setlevel(logging.INFO)
 
+MINE_BLOCKS = 5
 
 def valid_blockchain(blockchain):
   # TODO
@@ -30,7 +36,8 @@ def valid_guess(prev_hash, prev_proof, guess):
   # TODO might be sufficient to just use prev_hash. prev_proof is part of the prev_hash
   hash_val = hashlib.sha256(bytes(str(prev_hash) + str(prev_proof) + str(guess)))
   hash_str = hash_val.hexdigest()
-  return hash_str[:6] == '000000' or hash_str[:6] == '000001' or hash_str[:6] == '000002' or hash_str[:6] == '000003' or hash_str[:6] == '000004'
+  # return hash_str[:6] == '000000' or hash_str[:6] == '000001' or hash_str[:6] == '000002' or hash_str[:6] == '000003' or hash_str[:6] == '000004'
+  return hash_str[:6] == '000000'
 
 class Node:
   data_lock = Lock() # check about RW lock, could not find it inbuilt in threading module
@@ -88,18 +95,20 @@ class Node:
   # mining functions, this function continuously tries to mine the new blocks
   def mine_block(self):
     blocks = 0
-    while blocks < 5:
+    while blocks < MINE_BLOCKS:
       self.data_lock.acquire()
-      # get the tail block in case the block chain had changed
       curr_tail = self.blockchain[-1]
       self.data_lock.release()
 
       prev_hash = curr_tail['block_hash']
       prev_proof = curr_tail['proof']
       guess = random.randint(0, 2**31)
+      
+      blockchain_updated = False
       if valid_guess(prev_hash, prev_proof, guess):
         self.data_lock.acquire()
         check_tail = self.blockchain[-1]
+      
         # incase the chain has changed since this work started
         if check_tail == curr_tail:
           block = gen_block(prev_hash, guess, self.transactions)
@@ -107,16 +116,38 @@ class Node:
           self.transactions = []
           self.blockchain.append(block)
 
-          print '\nNew block minted by '+ str(self.port) + ', len: ' + str(len(self.blockchain)) + '\n'
+          logging.info('New block minted by '+ str(self.port) + ', len: ' + str(len(self.blockchain)))
           blocks += 1;
-          # gossip
-          for neighbour in self.neighbours:
-            url = 'http://localhost:' + str(neighbour) + '/new_blockchain/'
-            data = json.dumps(self.blockchain)
-            requests.post(url, json=data)
-        else:
-          print "\nblock changed during computation\n"
+          blockchain_updated = True
+
         self.data_lock.release() 
+
+      if blockchain_updated:
+        thread = Thread(target = self.gossip_blockchain)
+        thread.start()
+
+  def send_block(self, latency, dst_port, blockchain):
+    logging.info('Data sending beginning for ' + str(dst_port) + ' from ' + str(self.port))
+    sleep(latency)
+    url = 'http://localhost:' + str(dst_port) + '/new_blockchain/'
+    data = json.dumps(blockchain)
+    requests.post(url, json=data)
+    logging.info('Data sent to ' + str(dst_port) + ' from ' + str(self.port) + ' with latency: ' + str(latency))
+
+  def gossip_blockchain(self):
+    self.data_lock.acquire()
+    current_blockchain = self.blockchain
+    self.data_lock.release()
+
+    threads = []
+    for neighbour in self.neighbours:
+      latency = random.random()*min(abs(self.port - neighbour), 5)
+      thread = Thread(target=self.send_block, args = (latency, neighbour, current_blockchain))
+      thread.start()
+      threads.append(thread)
+
+    for thread in threads:
+      thread.join()
 
 
   def get_blockchain(self):
@@ -129,12 +160,11 @@ class Node:
     if valid_blockchain(blockchain):
       self.data_lock.acquire()
       if len(self.blockchain) < len(blockchain):
-        print '\nBlockchain has been updated by port:' + str(port) + '.Length change' + str(len(self.blockchain)) + '->'+ str(len(blockchain)) + '\n'
+        logging.info('Blockchain has been updated by port:' + str(self.port) + '. Length change: ' + str(len(self.blockchain)) + '->'+ str(len(blockchain)))
         self.blockchain = blockchain
+      elif len(self.blockchain) == len(blockchain):
+        logging.error('BLOCKCHAIN CONFLICT at port ' + str(self.port))
       self.data_lock.release()
-
-# def mine_block():
-#   node.mine_block()
   
 def spawn_node(port, neighbours):
   node = Node(port, neighbours)
