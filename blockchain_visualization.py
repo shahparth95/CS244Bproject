@@ -1,14 +1,8 @@
 import requests
-<<<<<<< HEAD
 from flask import Flask, request, jsonify, render_template, send_file
 import argparse
 import pydot
 import random
-=======
-from flask import Flask, request, jsonify, render_template
-import argparse
-import pydot
->>>>>>> db0bda101834cd3f5940074e76f072fb91257cba
 
 parser = argparse.ArgumentParser(description='Start a number of nodes to mine blockchains')
 parser.add_argument('integers', metavar='N', type=int, nargs='+', help='ports to query')
@@ -46,20 +40,33 @@ def show_network():
 blockchain_endpoint = '/current_blockchain/'
 blockchain_file = 'dot_files/blockchains.dot'
 blockchain_graph = 'images/blockchains.png'
+node_map = {}
+count = 0
 
 @app.route('/blockchain_status/')
 def show_blockchain_status():
+  global count
   url = 'http://localhost:%s' + blockchain_endpoint
   f = open(blockchain_file, 'w')
   f.write('digraph blockchains {\n') 
-  f.write('{\n') 
-  f.write('node [shape=box]\n') 
-  f.write('}\n') 
+  f.write('node [shape=box];\n') 
+  f.write('rankdir = "LR";\n') 
+  f.write('fixedsize = true;\n') 
   for port in ports:
     r = requests.get(url%(str(port)))
     blocks = r.json()
     for index in range(len(blocks) - 1):
-      f.write('%s -> %s;\n' % (str(blocks[index]['block_hash']), str(blocks[index+1]['block_hash'])))
+      src = blocks[index]['block_hash']
+      dst = blocks[index+1]['block_hash']
+      if src not in node_map:
+        node_map[src] = count
+        count += 1
+      
+      if dst not in node_map:
+        node_map[dst] = count
+        count += 1
+
+      f.write('node%s -> node%s;\n' % (str(node_map[src]), str(node_map[dst])))
   f.write('}\n')
   f.flush()
   f.close()

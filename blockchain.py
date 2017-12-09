@@ -35,8 +35,8 @@ def valid_guess(prev_hash, prev_proof, guess):
   # TODO might be sufficient to just use prev_hash. prev_proof is part of the prev_hash
   hash_val = hashlib.sha256(bytes(str(prev_hash) + str(prev_proof) + str(guess)))
   hash_str = hash_val.hexdigest()
-  return hash_str[:6] == '000000' or hash_str[:6] == '000001' or hash_str[:6] == '000002' or hash_str[:6] == '000003' or hash_str[:6] == '000004'
-  # return hash_str[:5] == '00000'
+  # return hash_str[:6] == '000000' or hash_str[:6] == '000001' or hash_str[:6] == '000002' or hash_str[:6] == '000003' or hash_str[:6] == '000004'
+  return hash_str[:5] == '00000'
 
 def check_different(blockchain_a, blockchain_b):
   if len(blockchain_a) != len(blockchain_b):
