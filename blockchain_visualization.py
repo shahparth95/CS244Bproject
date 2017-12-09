@@ -1,8 +1,14 @@
 import requests
+<<<<<<< HEAD
 from flask import Flask, request, jsonify, render_template, send_file
 import argparse
 import pydot
 import random
+=======
+from flask import Flask, request, jsonify, render_template
+import argparse
+import pydot
+>>>>>>> db0bda101834cd3f5940074e76f072fb91257cba
 
 parser = argparse.ArgumentParser(description='Start a number of nodes to mine blockchains')
 parser.add_argument('integers', metavar='N', type=int, nargs='+', help='ports to query')
@@ -40,6 +46,7 @@ def show_network():
 blockchain_endpoint = '/current_blockchain/'
 blockchain_file = 'dot_files/blockchains.dot'
 blockchain_graph = 'images/blockchains.png'
+
 @app.route('/blockchain_status/')
 def show_blockchain_status():
   url = 'http://localhost:%s' + blockchain_endpoint
