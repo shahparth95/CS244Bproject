@@ -19,32 +19,47 @@ def valid_blockchain(blockchain):
   # TODO
   return True
 
-def validate_transaction(state, txn):
-  # make a DEEP COPY
-  work_state = state
+def state_transition_function(state, txn):
+  work_state = state[:]
+
   input_txn = txn['input']
+  input_sum = 0
   # removing the input transactions
-  for txn in input_txn:
-    if txn not in work_state:
+  for in_txn in input_txn:
+    if in_txn not in work_state:
       return state, False
     else:
-      work_state.remove(txn)
+      work_state.remove(in_txn)
+      input_sum += in_txn['amount']
+
+  output_txn = txn['output']
+  output_sum = 0
+  # adding the output transactions
+  for out_txn in output_txn:
+    work_state.append(out_txn)
+    output_sum += out_txn['amount']
+
+  # can not generate money
+  if output_sum > input_sum:
+    return state, False
+
+  return work_state, True
 
 def gen_block(prev_hash, proof, state, txns = []):
+  valid_txns = []
   for txn in txns:
-    state, legit = validate_transaction(state, txn)
+    state, legit = state_transition_function(state, txn)
+    if legit:
+      valid_txns.append(txn)
 
   block = {}
   block['prev_hash'] = str(prev_hash)
   block['proof'] = str(proof)
-  block['transactions'] = str(txns) # init with empty list
+  block['transactions'] = valid_txns # init with empty list
   block['time'] = str(time())
-  block['state'] = str(state)
-  block_hash = hashlib.sha256(bytes(block['prev_hash'] + block['proof'] + block['state'] + block['transactions'] + block['time']))
+  block['state'] = state
+  block_hash = hashlib.sha256(bytes(block['prev_hash'] + block['proof'] + str(block['state']) + str(block['transactions']) + block['time']))
   block['block_hash'] = block_hash.hexdigest()
-
-  # print "\nBlock hash is \n" + block['block_hash']
-  # print "\nUTXOs are \n" + block['transactions']
 
   return block
 
@@ -65,18 +80,12 @@ def check_different(blockchain_a, blockchain_b):
 
   return False
 
-  # adding the output transactions
-  for txn in output_txn:
-    work_state.append(txn)
-
-  return work_state, True
-
 class Node:
   data_lock = Lock() # check about RW lock, could not find it inbuilt in threading module
   
   def __init__(self, port, neighbours = []):
     # TODO init should poll the neighbors to get the latest chain, in absence of which it should make the genesis block
-    self.transactions = []
+    self.transactions_seen = set()
     self.blockchain = []
     self.neighbours = set(neighbours)
     self.port = port
@@ -106,9 +115,17 @@ class Node:
   def add_transaction(self, txn):
     # TODO sanity check for transactions here
     # TODO with gossip, avoid adding the same transaction multiple times. Use dict for txns: hash -> txn
+    new_txn = False
     self.data_lock.acquire()
-    self.transactions.append(txn)
+    txn_hash = txn['hash']
+    if txn_hash not in self.transactions_seen:
+      self.transactions_seen.add(txn_hash)
+      self.transactions.append(txn)      
+      new_txn = True
     self.data_lock.release()
+
+    if new_txn:
+      self.gossip_data(txn, '/add_transaction/')
 
   def outstanding_transactions(self):
     self.data_lock.acquire()
@@ -122,27 +139,27 @@ class Node:
       {
         'sender': 'G',
         'receiver': 'A',
-        'amount': 100,
+        'amount': 10,
       },
       {
         'sender': 'G',
         'receiver': 'B',
-        'amount': 100,
+        'amount': 10,
       },
       {
         'sender': 'G',
         'receiver': 'C',
-        'amount': 100,
+        'amount': 10,
       },
       {
         'sender': 'G',
         'receiver': 'D',
-        'amount': 100,
+        'amount': 10,
       },
       {
         'sender': 'G',
         'receiver': 'E',
-        'amount': 100,
+        'amount': 10,
       }
     ]
     block = gen_block(prev_hash=hash_val, proof=proof, state=genesis_state)
@@ -150,6 +167,7 @@ class Node:
     self.data_lock.acquire()
     # state is not made as set of UTXOs to avoid removing duplicate transactions
     self.state = genesis_state
+    self.transactions = []
     self.blockchain.append(block)
     self.data_lock.release()
 
@@ -165,7 +183,30 @@ class Node:
       prev_proof = curr_tail['proof']
       guess = random.randint(0, 2**31)
       
-      blockchain_updated = False
+      # blockchain_updated = False
+      # if valid_guess(prev_hash, prev_proof, guess):
+      #   self.data_lock.acquire()
+      #   check_tail = self.blockchain[-1]
+      
+      #   # incase the chain has changed since this work started
+      #   if check_tail == curr_tail:
+
+      #     block = gen_block(prev_hash, guess, self.state, self.transactions)
+      #     # TODO
+      #     # CHANGE state here, only changed inside the gen_block
+      #     # TODO
+      #     self.blockchain.append(block)
+
+      #     logging.error('New block minted by '+ str(self.port) + ', len: ' + str(len(self.blockchain)))
+      #     blocks += 1;
+      #     blockchain_updated = True
+
+      #   self.data_lock.release() 
+
+      # if blockchain_updated:
+      #   self.gossip_blockchain()
+
+      send_blockchain = None
       if valid_guess(prev_hash, prev_proof, guess):
         self.data_lock.acquire()
         check_tail = self.blockchain[-1]
@@ -174,37 +215,54 @@ class Node:
         if check_tail == curr_tail:
 
           block = gen_block(prev_hash, guess, self.state, self.transactions)
-          # TODO
-          # CHANGE state here, only changed inside the gen_block
-          # TODO
+          self.state = block['state']
+          self.transactions = []
           self.blockchain.append(block)
 
           logging.error('New block minted by '+ str(self.port) + ', len: ' + str(len(self.blockchain)))
           blocks += 1;
-          blockchain_updated = True
-
+          send_blockchain = self.blockchain[:]
         self.data_lock.release() 
 
-      if blockchain_updated:
-        self.gossip_blockchain()
+      if send_blockchain != None:
+        self.gossip_data(json.dumps(send_blockchain), '/new_blockchain/')
 
-  def send_block(self, latency, dst_port, blockchain):
+  # def send_block(self, latency, dst_port, blockchain):
+  #   logging.info('Data sending beginning for ' + str(dst_port) + ' from ' + str(self.port))
+  #   sleep(5*latency)
+  #   url = 'http://localhost:' + str(dst_port) + '/new_blockchain/'
+  #   print type(blockchain)
+  #   data = json.dumps(blockchain)
+  #   print type(data)
+  #   requests.post(url, json=data)
+  #   logging.info('Data sent to ' + str(dst_port) + ' from ' + str(self.port) + ' with latency: ' + str(latency))
+
+  # def gossip_blockchain(self):
+  #   self.data_lock.acquire()
+  #   current_blockchain = self.blockchain
+  #   self.data_lock.release()
+
+  #   threads = []
+  #   print 'blockchain type', type(current_blockchain)
+  #   for neighbour in self.neighbours:
+  #     latency = random.random()*min(abs(self.port - neighbour), 10)
+  #     thread = Thread(target=self.send_block, args = (latency, neighbour, current_blockchain))
+  #     thread.start()
+  #     threads.append(thread)
+
+  def send_data(self, latency, dst_port, data, dst_endpoint):
     logging.info('Data sending beginning for ' + str(dst_port) + ' from ' + str(self.port))
-    sleep(5*latency)
-    url = 'http://localhost:' + str(dst_port) + '/new_blockchain/'
-    data = json.dumps(blockchain)
+    sleep(latency)
+    url = 'http://localhost:' + str(dst_port) + dst_endpoint
+    # data = json.dumps(data)
     requests.post(url, json=data)
     logging.info('Data sent to ' + str(dst_port) + ' from ' + str(self.port) + ' with latency: ' + str(latency))
 
-  def gossip_blockchain(self):
-    self.data_lock.acquire()
-    current_blockchain = self.blockchain
-    self.data_lock.release()
-
+  def gossip_data(self, data, dst_endpoint):
     threads = []
     for neighbour in self.neighbours:
-      latency = random.random()*min(abs(self.port - neighbour), 10)
-      thread = Thread(target=self.send_block, args = (latency, neighbour, current_blockchain))
+      latency = 2*random.random()*min(abs(self.port - neighbour), 10)
+      thread = Thread(target=self.send_data, args = (latency, neighbour, data, dst_endpoint))
       thread.start()
       threads.append(thread)
 
@@ -216,18 +274,20 @@ class Node:
 
   def merge_blockchain(self, blockchain):
     if valid_blockchain(blockchain):
-      blockchain_updated = False
+      send_blockchain = None
       self.data_lock.acquire()
       if len(self.blockchain) < len(blockchain):
         logging.error('Blockchain has been updated by port:' + str(self.port) + '. Length change: ' + str(len(self.blockchain)) + '->'+ str(len(blockchain)))
-        self.blockchain = blockchain
-        blockchain_updated = True
+        self.blockchain = blockchain[:]
+        self.state = blockchain[-1]['state'] # update state to new state
+        # TODO retrieve the lost transactions
+        send_blockchain = blockchain
       elif len(self.blockchain) == len(blockchain) and check_different(self.blockchain, blockchain):
         logging.error('BLOCKCHAIN CONFLICT at port ' + str(self.port))
       self.data_lock.release()
       
-      if blockchain_updated:
-        self.gossip_blockchain()
+      if send_blockchain:
+        self.gossip_data(json.dumps(send_blockchain), '/new_blockchain/')
 
 def spawn_node(port, neighbours):
   node = Node(port, neighbours)

@@ -3,6 +3,7 @@ import random
 from time import sleep
 import argparse
 import math
+import hashlib
 
 # total number of transactions
 N = 10
@@ -59,10 +60,6 @@ def get_ledger(UTXOs):
       ledger[receiver] += amount
     else:
       ledger[receiver] = amount
-
-  for user in users:
-    if user not in ledger:
-      ledger[user] = 0
   return ledger
 
 VALID_PROBABILITY = 1
@@ -85,9 +82,12 @@ def generate_transaction(UTXOs):
   else:
     txn['legit'] = True
     sender = random.choice(ledger.keys())
-    receiver = random.choice(ledger.keys())
+    while ledger[sender] <= 0:
+      sender = random.choice(ledger.keys())
+
+    receiver = random.choice(users)
     while sender == receiver:
-      receiver = random.choice(ledger.keys())
+      receiver = random.choice(users)
 
     max_amt = ledger[sender]
     sending_amt = random.randint(1, int(math.ceil(max_amt/2.0)))
@@ -115,6 +115,8 @@ def generate_transaction(UTXOs):
 
     txn['input'] = input_txns
     txn['output'] = output_txns
+    txn_hash = hashlib.md5(str(txn['input']) + str(txn['output'])) 
+    txn['hash'] = txn_hash.hexdigest()
   return txn
 
 def update_UTXOs(UTXOs, txn):
@@ -130,15 +132,15 @@ def update_UTXOs(UTXOs, txn):
   return UTXOs
 
 for i in range(N):
-  # for port in ports:
-  #   url = 'http://localhost:' + str(port) + add_endpoint
-  #   data = generate_transaction()
-  #   requests.post(url, json=data)
-  #   sleep(2*random.random())
+  port = random.choice(ports)
+  url = 'http://localhost:' + str(port) + add_endpoint
   txn = generate_transaction(UTXOs)
   UTXOs = update_UTXOs(UTXOs, txn)
-  ledger = get_ledger(UTXOs)
+  requests.post(url, json=txn)
+  print url
   print txn
-  for data in ledger:
-    print data, ledger[data]
-  print
+  sleep(random.random() * 3)
+
+ledger = get_ledger(UTXOs)
+for data in ledger:
+  print data, ledger[data]
