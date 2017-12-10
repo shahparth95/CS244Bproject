@@ -19,23 +19,38 @@ def valid_blockchain(blockchain):
   # TODO
   return True
 
-def gen_block(prev_hash, proof, txns = []):
+def validate_transaction(state, txn):
+  # make a DEEP COPY
+  work_state = state
+  input_txn = txn['input']
+  # removing the input transactions
+  for txn in input_txn:
+    if txn not in work_state:
+      return state, False
+    else:
+      work_state.remove(txn)
+
+def gen_block(prev_hash, proof, state, txns = []):
+  for txn in txns:
+    state, legit = validate_transaction(state, txn)
+
   block = {}
   block['prev_hash'] = str(prev_hash)
   block['proof'] = str(proof)
   block['transactions'] = str(txns) # init with empty list
   block['time'] = str(time())
-  # try and reason about this, why this provides safety in block
-  block_hash = hashlib.sha256(bytes(block['prev_hash'] + block['proof'] + block['transactions'] + block['time']))
+  block['state'] = str(state)
+  block_hash = hashlib.sha256(bytes(block['prev_hash'] + block['proof'] + block['state'] + block['transactions'] + block['time']))
   block['block_hash'] = block_hash.hexdigest()
-  print "\nBlock hash is \n" + block['block_hash']
-  print "\nUTXOs are \n" + block['transactions']
+
+  # print "\nBlock hash is \n" + block['block_hash']
+  # print "\nUTXOs are \n" + block['transactions']
 
   return block
 
 def valid_guess(prev_hash, prev_proof, guess):
   # TODO might be sufficient to just use prev_hash. prev_proof is part of the prev_hash
-  hash_val = hashlib.sha256(bytes(str(prev_hash) + str(prev_proof) + str(guess)))
+  hash_val = hashlib.sha256(bytes(str(prev_hash) + str(guess)))
   hash_str = hash_val.hexdigest()
   # return hash_str[:6] == '000000' or hash_str[:6] == '000001' or hash_str[:6] == '000002' or hash_str[:6] == '000003' or hash_str[:6] == '000004'
   return hash_str[:5] == '00000'
@@ -50,38 +65,18 @@ def check_different(blockchain_a, blockchain_b):
 
   return False
 
+  # adding the output transactions
+  for txn in output_txn:
+    work_state.append(txn)
+
+  return work_state, True
+
 class Node:
   data_lock = Lock() # check about RW lock, could not find it inbuilt in threading module
   
   def __init__(self, port, neighbours = []):
     # TODO init should poll the neighbors to get the latest chain, in absence of which it should make the genesis block
-    self.transactionState = [
-                              {
-                                'sender': 'G',
-                                'receiver': 'A',
-                                'amount': 100,
-                              },
-                              {
-                                'sender': 'G',
-                                'receiver': 'B',
-                                'amount': 100,
-                              },
-                              {
-                                'sender': 'G',
-                                'receiver': 'C',
-                                'amount': 100,
-                              },
-                              {
-                                'sender': 'G',
-                                'receiver': 'D',
-                                'amount': 100,
-                              },
-                              {
-                                'sender': 'G',
-                                'receiver': 'E',
-                                'amount': 100,
-                              }
-                            ]
+    self.transactions = []
     self.blockchain = []
     self.neighbours = set(neighbours)
     self.port = port
@@ -112,21 +107,49 @@ class Node:
     # TODO sanity check for transactions here
     # TODO with gossip, avoid adding the same transaction multiple times. Use dict for txns: hash -> txn
     self.data_lock.acquire()
-    self.transactionState.append(txn)
+    self.transactions.append(txn)
     self.data_lock.release()
 
   def outstanding_transactions(self):
     self.data_lock.acquire()
-    result = self.transactionState
+    result = self.transactions
     self.data_lock.release()
     return result
 
   # functions for block handelling
   def init_block(self, hash_val, proof):
-    print "\nCreating genesis block\n"
-    block = gen_block(hash_val, proof, self.transactionState)
+    genesis_state = [
+      {
+        'sender': 'G',
+        'receiver': 'A',
+        'amount': 100,
+      },
+      {
+        'sender': 'G',
+        'receiver': 'B',
+        'amount': 100,
+      },
+      {
+        'sender': 'G',
+        'receiver': 'C',
+        'amount': 100,
+      },
+      {
+        'sender': 'G',
+        'receiver': 'D',
+        'amount': 100,
+      },
+      {
+        'sender': 'G',
+        'receiver': 'E',
+        'amount': 100,
+      }
+    ]
+    block = gen_block(prev_hash=hash_val, proof=proof, state=genesis_state)
 
     self.data_lock.acquire()
+    # state is not made as set of UTXOs to avoid removing duplicate transactions
+    self.state = genesis_state
     self.blockchain.append(block)
     self.data_lock.release()
 
@@ -150,9 +173,10 @@ class Node:
         # incase the chain has changed since this work started
         if check_tail == curr_tail:
 
-          # TODO: validate a transaction here, add a read lock
-
-          block = gen_block(prev_hash, guess, self.transactionState)
+          block = gen_block(prev_hash, guess, self.state, self.transactions)
+          # TODO
+          # CHANGE state here, only changed inside the gen_block
+          # TODO
           self.blockchain.append(block)
 
           logging.error('New block minted by '+ str(self.port) + ', len: ' + str(len(self.blockchain)))
@@ -225,6 +249,7 @@ def spawn_node(port, neighbours):
     txn = request.get_json()
     # 1. add support for concurrent uses
     # 2. check for validation and if it consists of standard fields and determined later
+    #     need to have 'input' and 'output' keys
     # transactions.append(txn)
     node.add_transaction(txn)
     return str(txn) + 'added successfully'
