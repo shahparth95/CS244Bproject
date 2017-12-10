@@ -84,10 +84,15 @@ def generate_transaction(UTXOs):
     txn['legit'] = False
   else:
     txn['legit'] = True
-    sender = random.choice(ledger.keys())
-    receiver = random.choice(ledger.keys())
+    sender = random.choice(users)
+
+    # Select a sender with non-zero balance
+    while ledger[sender] <= 0:
+      sender = random.choice(users)
+
+    receiver = random.choice(users)
     while sender == receiver:
-      receiver = random.choice(ledger.keys())
+      receiver = random.choice(users)
 
     max_amt = ledger[sender]
     sending_amt = random.randint(1, int(math.ceil(max_amt/2.0)))
