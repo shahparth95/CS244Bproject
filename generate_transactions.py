@@ -1,12 +1,13 @@
 import requests
 import random
-from time import sleep
+from time import sleep, time
 import argparse
 import math
 import hashlib
 
 # total number of transactions
-N = 10
+N = 1000
+begin_hash = hashlib.md5(bytes(1234567890)).hexdigest()
 
 # endpoint to send the transactions
 add_endpoint = '/add_transaction/'
@@ -28,26 +29,31 @@ UTXOs = [
     'sender': 'G',
     'receiver': 'A',
     'amount': 10,
+    'hash': begin_hash
   },
   {
     'sender': 'G',
     'receiver': 'B',
     'amount': 10,
+    'hash': begin_hash
   },
   {
     'sender': 'G',
     'receiver': 'C',
     'amount': 10,
+    'hash': begin_hash
   },
   {
     'sender': 'G',
     'receiver': 'D',
     'amount': 10,
+    'hash': begin_hash
   },
   {
     'sender': 'G',
     'receiver': 'E',
     'amount': 10,
+    'hash': begin_hash
   }
 ]
 
@@ -89,6 +95,10 @@ def generate_transaction(UTXOs):
     while sender == receiver:
       receiver = random.choice(users)
 
+    # added to all the output_transactions as well
+    txn_hash = hashlib.md5(str(random.random())) 
+    txn['hash'] = txn_hash.hexdigest()
+
     max_amt = ledger[sender]
     sending_amt = random.randint(1, int(math.ceil(max_amt/2.0)))
     filtered_UTXOs = [utxo for utxo in UTXOs if utxo['receiver'] == sender]
@@ -104,19 +114,19 @@ def generate_transaction(UTXOs):
       {
         'sender': sender,
         'receiver': receiver,
-        'amount': sending_amt
+        'amount': sending_amt,
+        'hash': txn_hash.hexdigest()
       },
       {
         'sender': sender,
         'receiver': sender,
-        'amount': input_amount - sending_amt
+        'amount': input_amount - sending_amt,
+        'hash': txn_hash.hexdigest()
       }
     ]
 
     txn['input'] = input_txns
     txn['output'] = output_txns
-    txn_hash = hashlib.md5(str(txn['input']) + str(txn['output'])) 
-    txn['hash'] = txn_hash.hexdigest()
   return txn
 
 def update_UTXOs(UTXOs, txn):
@@ -131,15 +141,28 @@ def update_UTXOs(UTXOs, txn):
 
   return UTXOs
 
+def print_txn(txn):
+  print 'HASH:', txn['hash']
+  input_txns = txn['input']
+  output_txns = txn['output']
+  print "INPUT:"
+  for input_txn in input_txns:
+    print input_txn
+
+  print "OUTPUT:"
+  for output_txn in output_txns:
+    print output_txn
+
 for i in range(N):
   port = random.choice(ports)
   url = 'http://localhost:' + str(port) + add_endpoint
   txn = generate_transaction(UTXOs)
   UTXOs = update_UTXOs(UTXOs, txn)
-  requests.post(url, json=txn)
   print url
-  print txn
-  sleep(random.random() * 3)
+  # print_txn(txn)
+  # print
+  requests.post(url, json=txn)
+  sleep(random.random())
 
 ledger = get_ledger(UTXOs)
 for data in ledger:

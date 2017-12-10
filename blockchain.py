@@ -12,8 +12,10 @@ import math
 import logging
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
+logging.basicConfig(filename='blockchain.logs',level=logging.ERROR)
 
-MINE_BLOCKS = 7
+MINE_BLOCKS = 110
+begin_hash = hashlib.md5(bytes(1234567890)).hexdigest()
 
 def valid_blockchain(blockchain):
   # TODO
@@ -21,7 +23,6 @@ def valid_blockchain(blockchain):
 
 def state_transition_function(state, txn):
   work_state = state[:]
-
   input_txn = txn['input']
   input_sum = 0
   # removing the input transactions
@@ -64,7 +65,6 @@ def gen_block(prev_hash, proof, state, txns = []):
   return block
 
 def valid_guess(prev_hash, prev_proof, guess):
-  # TODO might be sufficient to just use prev_hash. prev_proof is part of the prev_hash
   hash_val = hashlib.sha256(bytes(str(prev_hash) + str(guess)))
   hash_str = hash_val.hexdigest()
   # return hash_str[:6] == '000000' or hash_str[:6] == '000001' or hash_str[:6] == '000002' or hash_str[:6] == '000003' or hash_str[:6] == '000004'
@@ -79,6 +79,13 @@ def check_different(blockchain_a, blockchain_b):
       return True
 
   return False
+
+def get_transactions(blockchain):
+  txns = []
+  for block in blockchain:
+    txns = txns+block['transactions']
+
+  return txns
 
 class Node:
   data_lock = Lock() # check about RW lock, could not find it inbuilt in threading module
@@ -114,7 +121,6 @@ class Node:
   # functions for adding and listing outstanding transactions
   def add_transaction(self, txn):
     # TODO sanity check for transactions here
-    # TODO with gossip, avoid adding the same transaction multiple times. Use dict for txns: hash -> txn
     new_txn = False
     self.data_lock.acquire()
     txn_hash = txn['hash']
@@ -140,26 +146,31 @@ class Node:
         'sender': 'G',
         'receiver': 'A',
         'amount': 10,
+        'hash': begin_hash
       },
       {
         'sender': 'G',
         'receiver': 'B',
         'amount': 10,
+        'hash': begin_hash
       },
       {
         'sender': 'G',
         'receiver': 'C',
         'amount': 10,
+        'hash': begin_hash
       },
       {
         'sender': 'G',
         'receiver': 'D',
         'amount': 10,
+        'hash': begin_hash
       },
       {
         'sender': 'G',
         'receiver': 'E',
         'amount': 10,
+        'hash': begin_hash
       }
     ]
     block = gen_block(prev_hash=hash_val, proof=proof, state=genesis_state)
@@ -183,29 +194,6 @@ class Node:
       prev_proof = curr_tail['proof']
       guess = random.randint(0, 2**31)
       
-      # blockchain_updated = False
-      # if valid_guess(prev_hash, prev_proof, guess):
-      #   self.data_lock.acquire()
-      #   check_tail = self.blockchain[-1]
-      
-      #   # incase the chain has changed since this work started
-      #   if check_tail == curr_tail:
-
-      #     block = gen_block(prev_hash, guess, self.state, self.transactions)
-      #     # TODO
-      #     # CHANGE state here, only changed inside the gen_block
-      #     # TODO
-      #     self.blockchain.append(block)
-
-      #     logging.error('New block minted by '+ str(self.port) + ', len: ' + str(len(self.blockchain)))
-      #     blocks += 1;
-      #     blockchain_updated = True
-
-      #   self.data_lock.release() 
-
-      # if blockchain_updated:
-      #   self.gossip_blockchain()
-
       send_blockchain = None
       if valid_guess(prev_hash, prev_proof, guess):
         self.data_lock.acquire()
@@ -213,7 +201,6 @@ class Node:
       
         # incase the chain has changed since this work started
         if check_tail == curr_tail:
-
           block = gen_block(prev_hash, guess, self.state, self.transactions)
           self.state = block['state']
           self.transactions = []
@@ -227,28 +214,7 @@ class Node:
       if send_blockchain != None:
         self.gossip_data(json.dumps(send_blockchain), '/new_blockchain/')
 
-  # def send_block(self, latency, dst_port, blockchain):
-  #   logging.info('Data sending beginning for ' + str(dst_port) + ' from ' + str(self.port))
-  #   sleep(5*latency)
-  #   url = 'http://localhost:' + str(dst_port) + '/new_blockchain/'
-  #   print type(blockchain)
-  #   data = json.dumps(blockchain)
-  #   print type(data)
-  #   requests.post(url, json=data)
-  #   logging.info('Data sent to ' + str(dst_port) + ' from ' + str(self.port) + ' with latency: ' + str(latency))
-
-  # def gossip_blockchain(self):
-  #   self.data_lock.acquire()
-  #   current_blockchain = self.blockchain
-  #   self.data_lock.release()
-
-  #   threads = []
-  #   print 'blockchain type', type(current_blockchain)
-  #   for neighbour in self.neighbours:
-  #     latency = random.random()*min(abs(self.port - neighbour), 10)
-  #     thread = Thread(target=self.send_block, args = (latency, neighbour, current_blockchain))
-  #     thread.start()
-  #     threads.append(thread)
+    logging.error(('Port: %s Finished')%(str(port)))
 
   def send_data(self, latency, dst_port, data, dst_endpoint):
     logging.info('Data sending beginning for ' + str(dst_port) + ' from ' + str(self.port))
@@ -274,20 +240,43 @@ class Node:
 
   def merge_blockchain(self, blockchain):
     if valid_blockchain(blockchain):
-      send_blockchain = None
+      send_blockchain = False
       self.data_lock.acquire()
       if len(self.blockchain) < len(blockchain):
-        logging.error('Blockchain has been updated by port:' + str(self.port) + '. Length change: ' + str(len(self.blockchain)) + '->'+ str(len(blockchain)))
+        logging.error('Blockchain has been updated by port:' + str(self.port) + '. Length change: ' + str(len(self.blockchain)) + '->'+ str(len(blockchain)) + '. Uncommitted txns: ' + str(len(uncommitted_txns)))
+        # make list of uncommitted transactions
+        new_committed_txns = get_transactions(blockchain)
+        current_committed_txns = get_transactions(self.blockchain)
+        uncommitted_txns = [txn for txn in current_committed_txns if txn not in new_committed_txns]
+
+        # update transaction list, state and blockchain
+        self.transactions = self.transactions + uncommitted_txns 
         self.blockchain = blockchain[:]
         self.state = blockchain[-1]['state'] # update state to new state
         # TODO retrieve the lost transactions
-        send_blockchain = blockchain
+        send_blockchain = True
       elif len(self.blockchain) == len(blockchain) and check_different(self.blockchain, blockchain):
         logging.error('BLOCKCHAIN CONFLICT at port ' + str(self.port))
       self.data_lock.release()
       
       if send_blockchain:
-        self.gossip_data(json.dumps(send_blockchain), '/new_blockchain/')
+        self.gossip_data(json.dumps(blockchain), '/new_blockchain/')
+
+  def get_ledger(self):
+    self.data_lock.acquire()
+    current_state = self.blockchain[-1]['state']
+    self.data_lock.release()
+
+    ledger = {}
+    for UTXO in current_state:
+      receiver = UTXO['receiver']
+      amount = UTXO['amount']
+      if receiver in ledger:
+        ledger[receiver] += amount
+      else:
+        ledger[receiver] = amount
+
+    return ledger
 
 def spawn_node(port, neighbours):
   node = Node(port, neighbours)
@@ -322,7 +311,6 @@ def spawn_node(port, neighbours):
   def current_blockchain():
     return jsonify(node.get_blockchain())
 
-  # TODO this is the endpoint where other nodes can submit their blockchains to propogate it in the network
   @app.route('/new_blockchain/', methods=['POST'])
   def new_blockchain():
     # TODO this can take some time, spawn a new thread to do this
@@ -330,11 +318,22 @@ def spawn_node(port, neighbours):
     node.merge_blockchain(blockchain)
     return "received"
 
+  @app.route('/get_ledger/', methods=['GET'])
+  def get_ledger():
+    # ledger is a dict, mapping 'account' to their current balances
+    ledger = node.get_ledger()
+    return jsonify(ledger)
+
+  def shutdown_server():
+    func = request.environ.get('werkzeug.server.shutdown')
+    if func is None:
+        raise RuntimeError('Not running with the Werkzeug Server')
+    func()
+  
   @app.route('/stop/')
   def stop():
-    # this is wrong update this
-    func = request.environ.get('werkzeug.server.shutdown')
-    func()
+    shutdown_server()
+    return 'Server shutting down...'
 
   thread1 = Thread(target = node.mine_block)
   thread1.start()
