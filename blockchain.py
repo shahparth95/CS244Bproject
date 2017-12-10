@@ -28,6 +28,8 @@ def gen_block(prev_hash, proof, txns = []):
   # try and reason about this, why this provides safety in block
   block_hash = hashlib.sha256(bytes(block['prev_hash'] + block['proof'] + block['transactions'] + block['time']))
   block['block_hash'] = block_hash.hexdigest()
+  print "\nBlock hash is \n" + block['block_hash']
+  print "\nUTXOs are \n" + block['transactions']
 
   return block
 
@@ -53,7 +55,33 @@ class Node:
   
   def __init__(self, port, neighbours = []):
     # TODO init should poll the neighbors to get the latest chain, in absence of which it should make the genesis block
-    self.transactions = []
+    self.transactionState = [
+                              {
+                                'sender': 'G',
+                                'receiver': 'A',
+                                'amount': 100,
+                              },
+                              {
+                                'sender': 'G',
+                                'receiver': 'B',
+                                'amount': 100,
+                              },
+                              {
+                                'sender': 'G',
+                                'receiver': 'C',
+                                'amount': 100,
+                              },
+                              {
+                                'sender': 'G',
+                                'receiver': 'D',
+                                'amount': 100,
+                              },
+                              {
+                                'sender': 'G',
+                                'receiver': 'E',
+                                'amount': 100,
+                              }
+                            ]
     self.blockchain = []
     self.neighbours = set(neighbours)
     self.port = port
@@ -84,18 +112,19 @@ class Node:
     # TODO sanity check for transactions here
     # TODO with gossip, avoid adding the same transaction multiple times. Use dict for txns: hash -> txn
     self.data_lock.acquire()
-    self.transactions.append(txn)
+    self.transactionState.append(txn)
     self.data_lock.release()
 
   def outstanding_transactions(self):
     self.data_lock.acquire()
-    result = self.transactions
+    result = self.transactionState
     self.data_lock.release()
     return result
 
   # functions for block handelling
   def init_block(self, hash_val, proof):
-    block = gen_block(hash_val, proof)
+    print "\nCreating genesis block\n"
+    block = gen_block(hash_val, proof, self.transactionState)
 
     self.data_lock.acquire()
     self.blockchain.append(block)
@@ -120,9 +149,10 @@ class Node:
       
         # incase the chain has changed since this work started
         if check_tail == curr_tail:
-          block = gen_block(prev_hash, guess, self.transactions)
 
-          self.transactions = []
+          # TODO: validate a transaction here, add a read lock
+
+          block = gen_block(prev_hash, guess, self.transactionState)
           self.blockchain.append(block)
 
           logging.error('New block minted by '+ str(self.port) + ', len: ' + str(len(self.blockchain)))
