@@ -5,10 +5,10 @@ import pydot
 import random
 
 parser = argparse.ArgumentParser(description='Start a number of nodes to mine blockchains')
-parser.add_argument('integers', metavar='N', type=int, nargs='+', help='ports to query')
+parser.add_argument('ports', metavar='N', type=int, nargs='+', help='ports to query')
 args = parser.parse_args()
 
-ports = args.integers
+ports = args.ports
 print ports
 
 # Flask Enpoints
@@ -66,7 +66,7 @@ def show_blockchain_status():
         node_map[dst] = count
         count += 1
 
-      f.write('node%s -> node%s;\n' % (str(node_map[src]), str(node_map[dst])))
+      f.write('block%s -> block%s;\n' % (str(node_map[src]), str(node_map[dst])))
   f.write('}\n')
   f.flush()
   f.close()
