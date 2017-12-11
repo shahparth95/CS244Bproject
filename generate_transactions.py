@@ -6,7 +6,7 @@ import math
 import hashlib
 
 # total number of transactions
-N = 1000
+N = 100
 begin_hash = hashlib.md5(bytes(1234567890)).hexdigest()
 
 # endpoint to send the transactions

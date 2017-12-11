@@ -14,7 +14,7 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 logging.basicConfig(filename='blockchain.logs',level=logging.ERROR)
 
-MINE_BLOCKS = 110
+MINE_BLOCKS = 10
 begin_hash = hashlib.md5(bytes(1234567890)).hexdigest()
 
 def valid_blockchain(blockchain):
@@ -243,11 +243,12 @@ class Node:
       send_blockchain = False
       self.data_lock.acquire()
       if len(self.blockchain) < len(blockchain):
-        logging.error('Blockchain has been updated by port:' + str(self.port) + '. Length change: ' + str(len(self.blockchain)) + '->'+ str(len(blockchain)) + '. Uncommitted txns: ' + str(len(uncommitted_txns)))
         # make list of uncommitted transactions
         new_committed_txns = get_transactions(blockchain)
         current_committed_txns = get_transactions(self.blockchain)
         uncommitted_txns = [txn for txn in current_committed_txns if txn not in new_committed_txns]
+        
+        logging.error('Blockchain has been updated by port:' + str(self.port) + '. Length change: ' + str(len(self.blockchain)) + '->'+ str(len(blockchain)) + '. Uncommitted txns: ' + str(len(uncommitted_txns)))
 
         # update transaction list, state and blockchain
         self.transactions = self.transactions + uncommitted_txns 

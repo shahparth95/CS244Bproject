@@ -1,0 +1,17 @@
+<!doctype html>
+<table style="width:100%" border="1">
+  <tr>
+    <th> Accounts </th>
+    {% for port in range(ports|count) %}
+      <th>{{ports[port]}}</th>
+    {% endfor %}
+  </tr>
+  {% for account in range(accounts|count) %}
+    <tr>
+      <td> {{accounts[account]}} </td>
+      {% for port in range(ports|count) %}
+        <td bgcolor={{color_scheme[accounts[account]][ports[port]]}}>{{ledgers[ports[port]][accounts[account]]}}</td>
+      {% endfor %}
+    </tr>
+  {% endfor %}
+</table>

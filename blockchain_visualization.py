@@ -76,5 +76,41 @@ def show_blockchain_status():
   
   return send_file(blockchain_graph)
 
+ledger_endpoint = '/get_ledger/'
+colors = ['#a6ff4d', '#ffff33', '#ff1a1a', '#3377ff', '#ffffff']
+@app.route('/get_ledger/')
+def get_ledger():
+  accounts = set()
+  port_ledgers = {}
+  url = 'http://localhost:%s' + ledger_endpoint
+  for port in ports:
+    r = requests.get(url%(str(port)))
+    ledger = r.json()
+    names = set(ledger.keys())
+    accounts = accounts | names
+    port_ledgers[port] = ledger
+
+  for account in accounts:
+    for port in ports:
+      if account not in port_ledgers[port]:
+        port_ledgers[port][account] = 'Not Seen'
+
+  color_ledger = {}
+  for account in accounts:
+    values_color_map = {}
+    port_color = {}
+    for port in ports:
+      val = port_ledgers[port][account]
+      if val in values_color_map:
+        port_color[port] = values_color_map[val]
+      else:
+        color = colors[len(values_color_map)]
+        values_color_map[val] = color
+        port_color[port] = values_color_map[val]
+    color_ledger[account] = port_color
+
+
+  return render_template('ledger_table.html', accounts=list(accounts), ports=ports, ledgers=port_ledgers, color_scheme=color_ledger)
+
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.run(port=10000)
