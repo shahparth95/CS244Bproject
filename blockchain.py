@@ -19,18 +19,16 @@ def valid_blockchain(blockchain):
   # TODO
   return True
 
-def gen_block(prev_hash, proof, txns = []):
+def gen_block(prev_hash, proof, state, txns = []):
   block = {}
   block['prev_hash'] = str(prev_hash)
   block['proof'] = str(proof)
-  block['transactions'] = str(txns) # init with empty list
+  block['transactions'] = txns # init with empty list
   block['time'] = str(time())
+  block['state'] = state # initial state (In Ethereum it will be for ex. an account balance)
   # try and reason about this, why this provides safety in block
-  block_hash = hashlib.sha256(bytes(block['prev_hash'] + block['proof'] + block['transactions'] + block['time']))
+  block_hash = hashlib.sha256(bytes(block['prev_hash'] + block['proof'] + str(block['transactions']) + block['time'] + str(block['state'])))
   block['block_hash'] = block_hash.hexdigest()
-  print "\nBlock hash is \n" + block['block_hash']
-  print "\nUTXOs are \n" + block['transactions']
-
   return block
 
 def valid_guess(prev_hash, prev_proof, guess):
@@ -55,33 +53,9 @@ class Node:
   
   def __init__(self, port, neighbours = []):
     # TODO init should poll the neighbors to get the latest chain, in absence of which it should make the genesis block
-    self.transactionState = [
-                              {
-                                'sender': 'G',
-                                'receiver': 'A',
-                                'amount': 100,
-                              },
-                              {
-                                'sender': 'G',
-                                'receiver': 'B',
-                                'amount': 100,
-                              },
-                              {
-                                'sender': 'G',
-                                'receiver': 'C',
-                                'amount': 100,
-                              },
-                              {
-                                'sender': 'G',
-                                'receiver': 'D',
-                                'amount': 100,
-                              },
-                              {
-                                'sender': 'G',
-                                'receiver': 'E',
-                                'amount': 100,
-                              }
-                            ]
+    self.knownTransactions = set()
+    self.outstandingTransactions = []
+    self.validTxn = False
     self.blockchain = []
     self.neighbours = set(neighbours)
     self.port = port
@@ -111,22 +85,31 @@ class Node:
   def add_transaction(self, txn):
     # TODO sanity check for transactions here
     # TODO with gossip, avoid adding the same transaction multiple times. Use dict for txns: hash -> txn
+    new_txn = False
     self.data_lock.acquire()
-    self.transactionState.append(txn)
+    txn_hash = txn['hash']
+    if txn_hash not in self.knownTransactions:
+        self.knownTransactions.add(txn_hash)
+        self.outstandingTransactions.append(txn)
+        new_txn = True
     self.data_lock.release()
+
+    if new_txn:
+        self.gossip_data(txn, '/add_transaction/')
 
   def outstanding_transactions(self):
     self.data_lock.acquire()
-    result = self.transactionState
+    result = self.outstandingTransactions
     self.data_lock.release()
     return result
 
   # functions for block handelling
   def init_block(self, hash_val, proof):
-    print "\nCreating genesis block\n"
-    block = gen_block(hash_val, proof, self.transactionState)
+    init_state = { 'A' : 100, 'B' : 100, 'C' : 100, 'D' : 100, 'E' : 100 }
+    block = gen_block(hash_val, proof, init_state, self.outstandingTransactions)
 
     self.data_lock.acquire()
+    self.state = init_state
     self.blockchain.append(block)
     self.data_lock.release()
 
@@ -151,11 +134,27 @@ class Node:
         if check_tail == curr_tail:
 
           # TODO: validate a transaction here, add a read lock
+          if self.outstandingTransactions.count != 0:
+              for txn in self.outstandingTransactions:
+                  output_txns = txn['output']
+                  self.validTxn = False
+                  for value in output_txns:
+                      sender = value['sender']
+                      receiver = value['receiver']
+                      amount = value['amount']
+                      if sender and receiver in self.state:
+                          self.state[sender] -= amount
+                          self.state[receiver] += amount
+                          self.validTxn = True
+                  if self.validTxn:
+                      self.outstandingTransactions.remove(txn)
 
-          block = gen_block(prev_hash, guess, self.transactionState)
+          block = gen_block(prev_hash, guess, self.state, self.outstandingTransactions)
           self.blockchain.append(block)
 
           logging.error('New block minted by '+ str(self.port) + ', len: ' + str(len(self.blockchain)))
+          logging.error('Current account balance is ' + str(self.state))
+
           blocks += 1;
           blockchain_updated = True
 
@@ -181,6 +180,22 @@ class Node:
     for neighbour in self.neighbours:
       latency = random.random()*min(abs(self.port - neighbour), 10)
       thread = Thread(target=self.send_block, args = (latency, neighbour, current_blockchain))
+      thread.start()
+      threads.append(thread)
+
+  def send_data(self, latency, dst_port, data, dst_endpoint):
+    logging.info('Data sending beginning for ' + str(dst_port) + ' from ' + str(self.port))
+    sleep(latency)
+    url = 'http://localhost:' + str(dst_port) + dst_endpoint
+    # data = json.dumps(data)
+    requests.post(url, json=data)
+    logging.info('Data sent to ' + str(dst_port) + ' from ' + str(self.port) + ' with latency: ' + str(latency))
+
+  def gossip_data(self, data, dst_endpoint):
+    threads = []
+    for neighbour in self.neighbours:
+      latency = 2*random.random()*min(abs(self.port - neighbour), 10)
+      thread = Thread(target=self.send_data, args = (latency, neighbour, data, dst_endpoint))
       thread.start()
       threads.append(thread)
 
