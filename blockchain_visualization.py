@@ -3,11 +3,14 @@ from flask import Flask, request, jsonify, render_template, send_file
 import argparse
 import pydot
 import random
+import hashlib
 
 parser = argparse.ArgumentParser(description='Start a number of nodes to mine blockchains')
 parser.add_argument('ports', metavar='N', type=int, nargs='+', help='ports to query')
+parser.add_argument('--start_port', default=10000, type=int, help='Number of nodes to spawn')
 args = parser.parse_args()
 
+start_port = args.start_port
 ports = args.ports
 print ports
 
@@ -112,5 +115,97 @@ def get_ledger():
 
   return render_template('ledger_table.html', accounts=list(accounts), ports=ports, ledgers=port_ledgers, color_scheme=color_ledger)
 
+# def get_transactions(blockchain):
+#   txns = []
+#   for block in blockchain:
+#     txns = txns+block['transactions']
+#   return txns
+# begin_hash = hashlib.md5(bytes(1234567890)).hexdigest()
+
+# UTXOs = [
+#   {
+#     'sender': 'G',
+#     'receiver': 'A',
+#     'amount': 10,
+#     'hash': begin_hash
+#   },
+#   {
+#     'sender': 'G',
+#     'receiver': 'B',
+#     'amount': 10,
+#     'hash': begin_hash
+#   },
+#   {
+#     'sender': 'G',
+#     'receiver': 'C',
+#     'amount': 10,
+#     'hash': begin_hash
+#   },
+#   {
+#     'sender': 'G',
+#     'receiver': 'D',
+#     'amount': 10,
+#     'hash': begin_hash
+#   },
+#   {
+#     'sender': 'G',
+#     'receiver': 'E',
+#     'amount': 10,
+#     'hash': begin_hash
+#   }
+# ]
+
+# def state_transition_function(state, txn):
+#   work_state = state[:]
+#   input_txn = txn['input']
+#   input_sum = 0
+#   # removing the input transactions
+#   for in_txn in input_txn:
+#     if in_txn not in work_state:
+#       return state, False
+#     else:
+#       work_state.remove(in_txn)
+#       input_sum += in_txn['amount']
+
+#   output_txn = txn['output']
+#   output_sum = 0
+#   # adding the output transactions
+#   for out_txn in output_txn:
+#     work_state.append(out_txn)
+#     output_sum += out_txn['amount']
+
+#   # can not generate money
+#   if output_sum > input_sum:
+#     return state, False
+
+#   return work_state, True
+
+# @app.route('/verify_txn_list/')
+# def verify_txn_list():
+#   url = 'http://localhost:5000' + blockchain_endpoint
+#   r = requests.get(url)
+#   blockchain = r.json()
+#   print type(blockchain), len(blockchain)
+#   transactions = get_transactions(blockchain)
+#   result = {}
+#   result['txn_count'] = len(transactions)
+#   # result['transactions'] = transactions
+#   state = UTXOs[:]
+  
+#   for txn in transactions:
+#     state, _ = state_transition_function(state, txn)
+
+#   ledger = {}
+#   for UTXO in state:
+#     receiver = UTXO['receiver']
+#     amount = UTXO['amount']
+#     if receiver in ledger:
+#       ledger[receiver] += amount
+#     else:
+#       ledger[receiver] = amount 
+#   result['ledger'] = ledger
+#   result['state_size'] = blockchain[-1]['state']
+#   return jsonify(result)
+
 app.config['TEMPLATES_AUTO_RELOAD'] = True
-app.run(port=10000)
+app.run(port=start_port)

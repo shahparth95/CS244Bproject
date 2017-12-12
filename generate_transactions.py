@@ -6,7 +6,7 @@ import math
 import hashlib
 
 # total number of transactions
-N = 100
+N = 500
 begin_hash = hashlib.md5(bytes(1234567890)).hexdigest()
 
 # endpoint to send the transactions
@@ -21,8 +21,8 @@ miners = map(str, args.miners)
 print miners
 
 users = ['A', 'B', 'C', 'D', 'E']
-for miner in miners:
-  users.append(miner)
+for i in range(45):
+  users.append(str(i))
 
 UTXOs = [
   {
@@ -159,9 +159,10 @@ for i in range(N):
   txn = generate_transaction(UTXOs)
   UTXOs = update_UTXOs(UTXOs, txn)
   print url
-  # print_txn(txn)
-  # print
-  requests.post(url, json=txn)
+  print txn['hash']
+  r = requests.post(url, json=txn)
+  print r.text
+  print 
   sleep(random.random())
 
 ledger = get_ledger(UTXOs)

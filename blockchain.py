@@ -14,7 +14,7 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 logging.basicConfig(filename='blockchain.logs',level=logging.ERROR)
 
-MINE_BLOCKS = 10
+MINE_BLOCKS = 120
 begin_hash = hashlib.md5(bytes(1234567890)).hexdigest()
 
 def valid_blockchain(blockchain):
@@ -28,6 +28,7 @@ def state_transition_function(state, txn):
   # removing the input transactions
   for in_txn in input_txn:
     if in_txn not in work_state:
+      logging.error(('txn not found: %s')%(in_txn['hash']))
       return state, False
     else:
       work_state.remove(in_txn)
@@ -47,9 +48,10 @@ def state_transition_function(state, txn):
   return work_state, True
 
 def gen_block(prev_hash, proof, state, txns = []):
+  work_state = state[:]
   valid_txns = []
   for txn in txns:
-    state, legit = state_transition_function(state, txn)
+    work_state, legit = state_transition_function(work_state, txn)
     if legit:
       valid_txns.append(txn)
 
@@ -58,7 +60,7 @@ def gen_block(prev_hash, proof, state, txns = []):
   block['proof'] = str(proof)
   block['transactions'] = valid_txns # init with empty list
   block['time'] = str(time())
-  block['state'] = state
+  block['state'] = work_state
   block_hash = hashlib.sha256(bytes(block['prev_hash'] + block['proof'] + str(block['state']) + str(block['transactions']) + block['time']))
   block['block_hash'] = block_hash.hexdigest()
 
@@ -84,7 +86,6 @@ def get_transactions(blockchain):
   txns = []
   for block in blockchain:
     txns = txns+block['transactions']
-
   return txns
 
 class Node:
@@ -106,6 +107,14 @@ class Node:
   def add_neighbour(self, port):
     self.data_lock.acquire()
     self.neighbours.add(port)
+    self.data_lock.release()    
+
+  '''
+  function to remove neighbour to the current node
+  '''
+  def remove_neighbour(self, port):
+    self.data_lock.acquire()
+    self.neighbours.remove(port)
     self.data_lock.release()    
 
   '''
@@ -131,7 +140,11 @@ class Node:
     self.data_lock.release()
 
     if new_txn:
+      logging.error('Port: %s, added txn %s'%(str(self.port), str(txn['hash'])))
       self.gossip_data(txn, '/add_transaction/')
+      return "Added"
+    else:
+      return "Duplicate ditacted"
 
   def outstanding_transactions(self):
     self.data_lock.acquire()
@@ -202,7 +215,7 @@ class Node:
         # incase the chain has changed since this work started
         if check_tail == curr_tail:
           block = gen_block(prev_hash, guess, self.state, self.transactions)
-          self.state = block['state']
+          self.state = block['state'][:]
           self.transactions = []
           self.blockchain.append(block)
 
@@ -220,9 +233,11 @@ class Node:
     logging.info('Data sending beginning for ' + str(dst_port) + ' from ' + str(self.port))
     sleep(latency)
     url = 'http://localhost:' + str(dst_port) + dst_endpoint
-    # data = json.dumps(data)
-    requests.post(url, json=data)
-    logging.info('Data sent to ' + str(dst_port) + ' from ' + str(self.port) + ' with latency: ' + str(latency))
+    try
+      requests.post(url, json=data)
+      logging.info('Data sent to ' + str(dst_port) + ' from ' + str(self.port) + ' with latency: ' + str(latency))
+    except:
+      logging.error('Error in sending data to ' + str(dst_port) + ' from ' + str(self.port))
 
   def gossip_data(self, data, dst_endpoint):
     threads = []
@@ -250,11 +265,14 @@ class Node:
         
         logging.error('Blockchain has been updated by port:' + str(self.port) + '. Length change: ' + str(len(self.blockchain)) + '->'+ str(len(blockchain)) + '. Uncommitted txns: ' + str(len(uncommitted_txns)))
 
+        for txn in self.transactions:
+          if txn not in new_committed_txns:
+            uncommitted_txns.append(txn)
+
         # update transaction list, state and blockchain
-        self.transactions = self.transactions + uncommitted_txns 
+        self.transactions = uncommitted_txns 
         self.blockchain = blockchain[:]
         self.state = blockchain[-1]['state'] # update state to new state
-        # TODO retrieve the lost transactions
         send_blockchain = True
       elif len(self.blockchain) == len(blockchain) and check_different(self.blockchain, blockchain):
         logging.error('BLOCKCHAIN CONFLICT at port ' + str(self.port))
@@ -290,6 +308,11 @@ def spawn_node(port, neighbours):
     node.add_neighbour(port)
     return 'current neighbours: ' + str(node.neighbours_set())
 
+  @app.route('/remove_node/<int:port>')
+  def remove_neighbour(port):
+    node.remove_neighbour(port)
+    return 'current neighbours: ' + str(node.neighbours_set())
+
   @app.route('/get_neighbours/')
   def get_neighbours():
     return jsonify(list(node.neighbours_set()))
@@ -301,8 +324,8 @@ def spawn_node(port, neighbours):
     # 2. check for validation and if it consists of standard fields and determined later
     #     need to have 'input' and 'output' keys
     # transactions.append(txn)
-    node.add_transaction(txn)
-    return str(txn) + 'added successfully'
+    return node.add_transaction(txn)
+    # return str(txn) + 'added successfully'
 
   @app.route('/outstanding_transactions/', methods=['GET'])
   def outstanding_transactions():
@@ -344,12 +367,14 @@ def spawn_node(port, neighbours):
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Start a number of nodes to mine blockchains')
   parser.add_argument('--nodes', default=5, type=int, help='Number of nodes to spawn')
+  parser.add_argument('--start', default=5000, type=int, help='Number of nodes to spawn')
   args = parser.parse_args()
   nodes = args.nodes
+  start = args.start
 
   processes = []
   for i in range(nodes):
-    ports = [5000+j for j in range(nodes)]
+    ports = [start+j for j in range(nodes)]
     port = ports[i]
     ports.remove(port)
     p = Process(target = spawn_node, args = (port, ports))
