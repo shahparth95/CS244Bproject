@@ -12,9 +12,8 @@ import math
 import logging
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
-logging.basicConfig(filename='blockchain.logs',level=logging.ERROR)
 
-MINE_BLOCKS = 120
+MINE_BLOCKS = 100
 begin_hash = hashlib.md5(bytes(1234567890)).hexdigest()
 
 def valid_blockchain(blockchain):
@@ -70,7 +69,7 @@ def valid_guess(prev_hash, prev_proof, guess):
   hash_val = hashlib.sha256(bytes(str(prev_hash) + str(guess)))
   hash_str = hash_val.hexdigest()
   # return hash_str[:6] == '000000' or hash_str[:6] == '000001' or hash_str[:6] == '000002' or hash_str[:6] == '000003' or hash_str[:6] == '000004'
-  return hash_str[:5] == '00000'
+  return hash_str[:6] == '000000'
 
 def check_different(blockchain_a, blockchain_b):
   if len(blockchain_a) != len(blockchain_b):
@@ -97,6 +96,9 @@ class Node:
     self.blockchain = []
     self.neighbours = set(neighbours)
     self.port = port
+    self.forkBlocks = 0
+    self.forkReset = False
+    self.noOfForks = 0
 
     # Create the genesis block
     self.init_block(1, 1)
@@ -140,7 +142,7 @@ class Node:
     self.data_lock.release()
 
     if new_txn:
-      logging.error('Port: %s, added txn %s'%(str(self.port), str(txn['hash'])))
+      #logging.error('Port: %s, added txn %s'%(str(self.port), str(txn['hash'])))
       self.gossip_data(txn, '/add_transaction/')
       return "Added"
     else:
@@ -219,7 +221,7 @@ class Node:
           self.transactions = []
           self.blockchain.append(block)
 
-          logging.error('New block minted by '+ str(self.port) + ', len: ' + str(len(self.blockchain)))
+          #logging.error('New block minted by '+ str(self.port) + ', len: ' + str(len(self.blockchain)))
           blocks += 1;
           send_blockchain = self.blockchain[:]
         self.data_lock.release() 
@@ -227,13 +229,13 @@ class Node:
       if send_blockchain != None:
         self.gossip_data(json.dumps(send_blockchain), '/new_blockchain/')
 
-    logging.error(('Port: %s Finished')%(str(port)))
+    logging.error(('Port: %s Finished')%(str(self.port)))
 
   def send_data(self, latency, dst_port, data, dst_endpoint):
     logging.info('Data sending beginning for ' + str(dst_port) + ' from ' + str(self.port))
     sleep(latency)
     url = 'http://localhost:' + str(dst_port) + dst_endpoint
-    try
+    try:
       requests.post(url, json=data)
       logging.info('Data sent to ' + str(dst_port) + ' from ' + str(self.port) + ' with latency: ' + str(latency))
     except:
@@ -275,7 +277,11 @@ class Node:
         self.state = blockchain[-1]['state'] # update state to new state
         send_blockchain = True
       elif len(self.blockchain) == len(blockchain) and check_different(self.blockchain, blockchain):
-        logging.error('BLOCKCHAIN CONFLICT at port ' + str(self.port))
+        for i in range(len(self.blockchain)):
+          if self.blockchain[i]['block_hash'] != blockchain[i]['block_hash']:
+            self.forkBlocks += 1
+        self.noOfForks += 1
+        logging.error('BLOCKCHAIN CONFLICT at port ' + str(self.port) + ' ForkBlocks: ' + str(self.forkBlocks) + ' NoOfForks: ' + str(self.noOfForks))
       self.data_lock.release()
       
       if send_blockchain:
@@ -367,7 +373,7 @@ def spawn_node(port, neighbours):
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Start a number of nodes to mine blockchains')
   parser.add_argument('--nodes', default=5, type=int, help='Number of nodes to spawn')
-  parser.add_argument('--start', default=5000, type=int, help='Number of nodes to spawn')
+  parser.add_argument('--start', default=6000, type=int, help='Number of nodes to spawn')
   args = parser.parse_args()
   nodes = args.nodes
   start = args.start
