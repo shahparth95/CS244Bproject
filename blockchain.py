@@ -14,11 +14,22 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 logging.basicConfig(filename='blockchain.logs',level=logging.ERROR)
 
-MINE_BLOCKS = 120
+MINE_BLOCKS = 20
 begin_hash = hashlib.md5(bytes(1234567890)).hexdigest()
 
+def valid_guess(prev_hash, guess):
+  hash_val = hashlib.sha256(bytes(str(prev_hash) + str(guess)))
+  hash_str = hash_val.hexdigest()
+  # return hash_str[:6] == '000000' or hash_str[:6] == '000001' or hash_str[:6] == '000002' or hash_str[:6] == '000003' or hash_str[:6] == '000004'
+  return hash_str[:5] == '00000'
+
 def valid_blockchain(blockchain):
-  # TODO
+  for index in range(1, len(blockchain)):
+    prev_hash = blockchain[index-1]['block_hash']
+    proof = blockchain[index]['proof']
+    if not valid_guess(prev_hash, proof):
+      return False
+
   return True
 
 def state_transition_function(state, txn):
@@ -66,11 +77,6 @@ def gen_block(prev_hash, proof, state, txns = []):
 
   return block
 
-def valid_guess(prev_hash, prev_proof, guess):
-  hash_val = hashlib.sha256(bytes(str(prev_hash) + str(guess)))
-  hash_str = hash_val.hexdigest()
-  # return hash_str[:6] == '000000' or hash_str[:6] == '000001' or hash_str[:6] == '000002' or hash_str[:6] == '000003' or hash_str[:6] == '000004'
-  return hash_str[:5] == '00000'
 
 def check_different(blockchain_a, blockchain_b):
   if len(blockchain_a) != len(blockchain_b):
@@ -92,7 +98,6 @@ class Node:
   data_lock = Lock() # check about RW lock, could not find it inbuilt in threading module
   
   def __init__(self, port, neighbours = []):
-    # TODO init should poll the neighbors to get the latest chain, in absence of which it should make the genesis block
     self.transactions_seen = set()
     self.blockchain = []
     self.neighbours = set(neighbours)
@@ -127,9 +132,10 @@ class Node:
     
     return result
 
-  # functions for adding and listing outstanding transactions
+  '''
+  functions for adding new transactions
+  '''
   def add_transaction(self, txn):
-    # TODO sanity check for transactions here
     new_txn = False
     self.data_lock.acquire()
     txn_hash = txn['hash']
@@ -146,13 +152,18 @@ class Node:
     else:
       return "Duplicate ditacted"
 
+  '''
+  functions for listing outstanding transactions
+  '''
   def outstanding_transactions(self):
     self.data_lock.acquire()
     result = self.transactions
     self.data_lock.release()
     return result
 
-  # functions for block handelling
+  '''
+  init block makes the first block in the blockchain
+  '''
   def init_block(self, hash_val, proof):
     genesis_state = [
       {
@@ -195,7 +206,10 @@ class Node:
     self.blockchain.append(block)
     self.data_lock.release()
 
-  # mining functions, this function continuously tries to mine the new blocks
+  
+  '''
+  mining functions, this function continuously tries to mine the new blocks
+  '''
   def mine_block(self):
     blocks = 0
     while blocks < MINE_BLOCKS:
@@ -208,13 +222,14 @@ class Node:
       guess = random.randint(0, 2**31)
       
       send_blockchain = None
-      if valid_guess(prev_hash, prev_proof, guess):
+      if valid_guess(prev_hash, guess):
         self.data_lock.acquire()
         check_tail = self.blockchain[-1]
       
         # incase the chain has changed since this work started
         if check_tail == curr_tail:
           block = gen_block(prev_hash, guess, self.state, self.transactions)
+          block['miner'] = self.port
           self.state = block['state'][:]
           self.transactions = []
           self.blockchain.append(block)
@@ -229,16 +244,22 @@ class Node:
 
     logging.error(('Port: %s Finished')%(str(port)))
 
+  '''
+  Used to send data to a given  dst port and endpoint
+  '''
   def send_data(self, latency, dst_port, data, dst_endpoint):
     logging.info('Data sending beginning for ' + str(dst_port) + ' from ' + str(self.port))
     sleep(latency)
     url = 'http://localhost:' + str(dst_port) + dst_endpoint
-    try
+    try:
       requests.post(url, json=data)
       logging.info('Data sent to ' + str(dst_port) + ' from ' + str(self.port) + ' with latency: ' + str(latency))
     except:
       logging.error('Error in sending data to ' + str(dst_port) + ' from ' + str(self.port))
 
+  '''
+  asynchronously sends data to different neighbors
+  '''
   def gossip_data(self, data, dst_endpoint):
     threads = []
     for neighbour in self.neighbours:
@@ -247,12 +268,14 @@ class Node:
       thread.start()
       threads.append(thread)
 
+  '''returns the current blockchain'''
   def get_blockchain(self):
     self.data_lock.acquire()
     result = self.blockchain
     self.data_lock.release()
     return result
 
+  '''merging function'''
   def merge_blockchain(self, blockchain):
     if valid_blockchain(blockchain):
       send_blockchain = False
@@ -325,7 +348,6 @@ def spawn_node(port, neighbours):
     #     need to have 'input' and 'output' keys
     # transactions.append(txn)
     return node.add_transaction(txn)
-    # return str(txn) + 'added successfully'
 
   @app.route('/outstanding_transactions/', methods=['GET'])
   def outstanding_transactions():
@@ -337,7 +359,6 @@ def spawn_node(port, neighbours):
 
   @app.route('/new_blockchain/', methods=['POST'])
   def new_blockchain():
-    # TODO this can take some time, spawn a new thread to do this
     blockchain = json.loads(request.get_json())
     node.merge_blockchain(blockchain)
     return "received"

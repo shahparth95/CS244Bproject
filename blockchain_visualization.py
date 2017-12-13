@@ -115,6 +115,21 @@ def get_ledger():
 
   return render_template('ledger_table.html', accounts=list(accounts), ports=ports, ledgers=port_ledgers, color_scheme=color_ledger)
 
+@app.route('/get_mining_count/')
+def get_mining_count():
+  url = 'http://localhost:5000' + blockchain_endpoint
+  r = requests.get(url)
+  blocks = r.json()
+  mine_count = {}
+  for index in range(1, len(blocks)):
+    miner = blocks[index]['miner']
+    if miner in mine_count:
+      mine_count[miner] += 1
+    else:
+      mine_count[miner] = 1
+
+  return jsonify(mine_count)
+
 # def get_transactions(blockchain):
 #   txns = []
 #   for block in blockchain:
