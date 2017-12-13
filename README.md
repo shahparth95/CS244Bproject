@@ -2,7 +2,8 @@
 
 ## Blockchain consenseus protocol
 
-Implementation of Proof-Of-Work consensus protocol using Python 2.7
+Implementation of Proof-Of-Work consensus protocol using Python (Ver. 2.7)
+
 Tested working of consensus protocol using both UTXO(Bitcoin) and Account(Ethereum)
 based transactions and implementing a simple ledger over the blockchain
 
