@@ -233,7 +233,7 @@ class Node:
     logging.info('Data sending beginning for ' + str(dst_port) + ' from ' + str(self.port))
     sleep(latency)
     url = 'http://localhost:' + str(dst_port) + dst_endpoint
-    try
+    try:
       requests.post(url, json=data)
       logging.info('Data sent to ' + str(dst_port) + ' from ' + str(self.port) + ' with latency: ' + str(latency))
     except:
